@@ -642,46 +642,61 @@ public:
         }
 
 
-        float mod_d = V_to_mod * ictrl.Vd_setpoint;
-        float mod_q = V_to_mod * ictrl.Vq_setpoint;
-        bool is_mod_saturated = false;
+        float mod_d_setpoint = V_to_mod * ictrl.Vd_setpoint;
+        float mod_q_setpoint = V_to_mod * ictrl.Vq_setpoint;
+        float mod_d = mod_d_setpoint;
+        float mod_q = mod_q_setpoint;
 
-        // Vector modulation saturation, lock integrator if saturated
+        // Estimate bus current and apply limit
+        float I_bus = mod_d * Id + mod_q * Iq;
+
+        float I_bus_delta = 0.0f;
+        if (I_bus > config_.I_bus_soft_max) {
+            I_bus_delta = config_.I_bus_soft_max - I_bus;
+        //} else if (I_bus < config_.I_bus_soft_min) { TODO: think about the correct action here
+        //    I_bus_delta = config_.I_bus_soft_min - I_bus;
+        }
+
+        float I_norm_sqr = Id * Id + Iq * Iq;
+        float mod_delta_scale = (I_norm_sqr > 0.001f) ? (I_bus_delta / I_norm_sqr) : 0.0f;
+        mod_d += Id * mod_delta_scale;
+        mod_q += Iq * mod_delta_scale;
+
+
         // TODO make maximum modulation configurable
         float mod_scalefactor = MAX_MODULATION * sqrt3_by_2 * 1.0f / sqrtf(mod_d * mod_d + mod_q * mod_q);
         mod_scalefactor = std::min(mod_scalefactor, 1.0f);
         if (mod_scalefactor < 1.0f) {
             mod_d *= mod_scalefactor;
             mod_q *= mod_scalefactor;
-            is_mod_saturated = true;
         }
 
-        // Estimate bus current and apply limit
-        float I_bus = mod_d * Id + mod_q * Iq;
-        (void) I_bus;
+        float delta_mod_d = mod_d - mod_d_setpoint;
+        float delta_mod_q = mod_q - mod_q_setpoint;
 
-        /* TODO: apply I_bus limit
-        
-        float I_bus_delta = 0.0f;
+        // Run integrator antiwindup if there is a component of the error vector
+        // that points against the direction in which we post-adjusted the modulation vector
+        bool antiwindup = (delta_mod_d * Ierr_d + delta_mod_q * Ierr_q) < 0.0f;
 
-        if (I_bus > ictrl.Ibus_max_soft) {
-            I_bus_delta = ictrl.Ibus_max_soft - I_bus;
-            is_mod_saturated = true;
-        }
-        if (I_bus < ictrl.Ibus_min_soft) {
-            I_bus_delta = ictrl.Ibus_min_soft - I_bus;
-            is_mod_saturated = true;
-        }*/
+        float delta_mod_length = sqrtf(delta_mod_d * delta_mod_d + delta_mod_q * delta_mod_q);
+        delta_mod_d /= delta_mod_length;
+        delta_mod_q /= delta_mod_length;
 
         if (ictrl.enable_current_control) {
-            // Voltage saturation
-            if (is_mod_saturated) {
+            if (antiwindup) {
+                // project Ierr along the direction orthogonal to the delta_mod
+                Ierr_d *= -delta_mod_q;
+                Ierr_q *= delta_mod_d;
+            }
+
+            ictrl.v_current_control_integral_d += Ierr_d * (ictrl.i_gain * dt);
+            ictrl.v_current_control_integral_q += Ierr_q * (ictrl.i_gain * dt);
+
+            if (antiwindup) {
+                // decay integral in the direction of delta_mod
                 // TODO make decayfactor configurable
-                ictrl.v_current_control_integral_d *= 0.99f;
-                ictrl.v_current_control_integral_q *= 0.99f;
-            } else {
-                ictrl.v_current_control_integral_d += Ierr_d * (ictrl.i_gain * dt);
-                ictrl.v_current_control_integral_q += Ierr_q * (ictrl.i_gain * dt);
+                ictrl.v_current_control_integral_d -= 0.014f * ictrl.v_current_control_integral_d * delta_mod_d;
+                ictrl.v_current_control_integral_q -= 0.014f * ictrl.v_current_control_integral_q * delta_mod_q;
             }
         }
 

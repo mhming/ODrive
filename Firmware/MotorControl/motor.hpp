@@ -122,8 +122,37 @@ public:
         
         float phase_delay = 0.0f; // this is useful mostly if phase_locked is true. Must not be changed after calibrating the encoder with a synchronous motor
 
-        float I_bus_hard_min = -INFINITY; // hard lower limit for bus current contribution
-        float I_bus_hard_max = INFINITY; // hard upper limit for bus current contribution
+        /**
+         * @brief Hard lower limit for bus current contribution
+         * 
+         * If the controller fails to keep the DC current within the range
+         * I_bus_hard_min ... I_bus_hard_max, the motor is disarmed.
+         */
+        float I_bus_hard_min = -INFINITY;
+
+        /** @brief Hard upper limit for bus current contribution. See I_bus_hard_min for details. */
+        float I_bus_hard_max = INFINITY;
+
+        /**
+         * @brief Soft lower limit for bus current contribution
+         * 
+         * Negative I_bus means power flows from the motor to the power supply,
+         * therefore a lower limit of -10A means that at most 10A is pumped back
+         * into the power supply and braking resistor.
+         * 
+         * NOT IMPLEMENTED YET
+         */
+        //float I_bus_soft_min = -INFINITY;
+
+        /**
+         * @brief Soft upper limit for bus current contribution
+         *
+         * Positive I_bus means power flows from the power supply to the motor,
+         * therefore an upper limit of 10A means that at most 10A is drained
+         * from the power supply.
+         */
+        float I_bus_soft_max = INFINITY; // hard upper limit for bus current contribution
+
 
         float max_leak_current = INFINITY; // [A] if three current sensors are available, the motor will disarm if this much current leaks out of the three phases
 
